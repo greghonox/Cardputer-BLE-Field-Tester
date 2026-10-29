@@ -6,6 +6,8 @@
 #include <BLEUtils.h>
 #include <algorithm>
 #include <vector>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 namespace {
 constexpr uint32_t SCAN_SECONDS = 5;
@@ -28,6 +30,10 @@ struct DeviceEntry {
 };
 
 std::vector<DeviceEntry> devices;
+SemaphoreHandle_t devicesMutex = nullptr;
+volatile bool scanResultsDirty = false;
+uint32_t lastScanScreenDrawAt = 0;
+uint32_t scanDeadlineAt = 0;
 BLEScan *scanner = nullptr;
 BLEClient *client = nullptr;
 enum class Screen { DeviceList, DeviceDetail, GattServices };
@@ -65,8 +71,20 @@ void drawScanScreen() {
   currentScreen = Screen::DeviceList;
   drawHeader(scanning ? "BUSCA BLE ATIVA" : "DISPOSITIVOS PROXIMOS");
   auto &d = M5Cardputer.Display;
+  std::vector<DeviceEntry> snapshot;
+  if (devicesMutex && xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+    snapshot = devices;
+    xSemaphoreGive(devicesMutex);
+  }
   d.setTextColor(scanning ? COLOR_WARN : COLOR_DIM, COLOR_BG);
-  d.drawString(scanning ? "Escaneando anuncios..." : String(devices.size()) + " encontrados", 8, 46);
+  d.drawString(scanning ? "Escaneando anuncios..." : String(snapshot.size()) + " encontrados", 8, 46);
+  const size_t deviceCount = snapshot.size();
+  if (deviceCount > 0) {
+    const uint8_t visibleRows = std::max<int>(1, std::min<int>(PAGE_SIZE, (d.height() - 60 - 30) / 28));
+    selectedIndex = std::min<size_t>(selectedIndex, deviceCount - 1);
+    if (selectedIndex < pageOffset) pageOffset = selectedIndex;
+    if (selectedIndex >= pageOffset + visibleRows) pageOffset = selectedIndex - visibleRows + 1;
+  }
   const int screenHeight = d.height();
   const int listTop = 60;
   const int footerY = screenHeight - 30;
@@ -74,26 +92,30 @@ void drawScanScreen() {
   const uint8_t visibleRows = footerY > listTop
       ? std::min<int>(PAGE_SIZE, (footerY - listTop) / rowStep)
       : 1;
-  const uint8_t begin = pageOffset;
-  const uint8_t end = std::min<size_t>(devices.size(), begin + visibleRows);
-  for (uint8_t i = begin; i < end; ++i) {
-    const DeviceEntry &entry = devices[i];
-    const bool selected = i == selectedIndex;
-    d.setTextColor(selected ? COLOR_BG : COLOR_FOUND, selected ? COLOR_FOUND : COLOR_BG);
-    String name = entry.name.isEmpty() ? "(sem nome anunciado)" : entry.name;
-    if (name.length() > 22) name = name.substring(0, 21) + "~";
-    char row[48];
-    snprintf(row, sizeof(row), "%c %-22s %4d", selected ? '>' : ' ', name.c_str(), entry.rssi);
-    const int y = listTop + (i - begin) * rowStep;
-    d.drawString(row, 8, y);
-    d.setTextColor(COLOR_DIM, COLOR_BG);
-    d.drawString(shortAddress(entry.address), 22, y + 12);
-  }
-  if (devices.size() > visibleRows) {
-    d.setTextColor(COLOR_WARN, COLOR_BG);
-    d.drawString("Pagina " + String(pageOffset / visibleRows + 1) + "/" +
-                     String((devices.size() + visibleRows - 1) / visibleRows),
-                 d.width() - 62, 46);
+  if (devicesMutex && xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+    const size_t deviceCount = devices.size();
+    const uint8_t begin = pageOffset;
+    const uint8_t end = std::min<size_t>(deviceCount, begin + visibleRows);
+    for (uint8_t i = begin; i < end; ++i) {
+      const DeviceEntry &entry = snapshot[i];
+      const bool selected = i == selectedIndex;
+      d.setTextColor(selected ? COLOR_BG : COLOR_FOUND, selected ? COLOR_FOUND : COLOR_BG);
+      String name = entry.name.isEmpty() ? "(sem nome anunciado)" : entry.name;
+      if (name.length() > 22) name = name.substring(0, 21) + "~";
+      char row[48];
+      snprintf(row, sizeof(row), "%c %-22s %4d", selected ? '>' : ' ', name.c_str(), entry.rssi);
+      const int y = listTop + (i - begin) * rowStep;
+      d.drawString(row, 8, y);
+      d.setTextColor(COLOR_DIM, COLOR_BG);
+      d.drawString(shortAddress(entry.address), 22, y + 12);
+    }
+    if (deviceCount > visibleRows) {
+      d.setTextColor(COLOR_WARN, COLOR_BG);
+      d.drawString("Pagina " + String(pageOffset / visibleRows + 1) + "/" +
+                       String((deviceCount + visibleRows - 1) / visibleRows),
+                   d.width() - 62, 46);
+    }
+    xSemaphoreGive(devicesMutex);
   }
   d.setTextColor(COLOR_WARN, COLOR_BG);
   d.drawString(statusMessage, 8, footerY);
@@ -164,6 +186,7 @@ void drawServiceList() {
 
 void onDeviceFound(BLEAdvertisedDevice advertised) {
   const String address = advertised.getAddress().toString().c_str();
+  if (!devicesMutex || xSemaphoreTake(devicesMutex, 0) != pdTRUE) return;
   auto found = std::find_if(devices.begin(), devices.end(), [&](const DeviceEntry &item) {
     return item.address == address;
   });
@@ -174,12 +197,13 @@ void onDeviceFound(BLEAdvertisedDevice advertised) {
     entry.rssi = advertised.getRSSI();
     entry.lastSeen = millis();
     devices.push_back(entry);
-    statusMessage = "Novo dispositivo detectado";
+    scanResultsDirty = true;
   } else {
     if (advertised.haveName()) found->name = advertised.getName().c_str();
     found->rssi = advertised.getRSSI();
     found->lastSeen = millis();
   }
+  xSemaphoreGive(devicesMutex);
 }
 
 class DeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
@@ -246,11 +270,22 @@ void disconnectDevice() {
 void startScan() {
   if (scanning) return;
   if (connected) disconnectDevice();
-  devices.clear();
+  if (devicesMutex && xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    scanner->clearResults();
+    devices.clear();
+    xSemaphoreGive(devicesMutex);
+  } else {
+    statusMessage = "Lista ocupada; tente novamente";
+    drawScanScreen();
+    return;
+  }
   selectedIndex = 0;
   pageOffset = 0;
+  scanResultsDirty = false;
   scanning = true;
+  scanDeadlineAt = millis() + (SCAN_SECONDS + 1) * 1000UL;
   statusMessage = "Busca BLE em andamento";
+  lastScanScreenDrawAt = 0;
   drawScanScreen();
   const bool started = scanner->start(SCAN_SECONDS, nullptr, false);
   if (!started) {
@@ -261,7 +296,9 @@ void startScan() {
   }
 
   const uint32_t start = millis();
-  while (millis() - start < SCAN_SECONDS * 1000UL + 1500UL) {
+  lastScanScreenDrawAt = start;
+  scanResultsDirty = false;
+  while (static_cast<int32_t>(millis() - scanDeadlineAt) < 0) {
     M5Cardputer.update();
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
       const auto keys = M5Cardputer.Keyboard.keysState();
@@ -270,8 +307,13 @@ void startScan() {
         break;
       }
     }
-    drawScanScreen();
-    delay(40);
+    const uint32_t now = millis();
+    if (scanResultsDirty && now - lastScanScreenDrawAt >= 250) {
+      scanResultsDirty = false;
+      lastScanScreenDrawAt = now;
+      drawScanScreen();
+    }
+    delay(10);
   }
   scanner->stop();
   scanning = false;
@@ -282,14 +324,25 @@ void startScan() {
 }
 
 void handleScanKeys(const Keyboard_Class::KeysState &keys) {
-  if (keys.up && selectedIndex > 0) --selectedIndex;
-  if (keys.down && selectedIndex + 1 < devices.size()) ++selectedIndex;
-  if (keys.right && selectedIndex + 1 < devices.size()) selectedIndex = std::min<size_t>(devices.size() - 1, pageOffset + PAGE_SIZE);
-  if (keys.left && selectedIndex > 0) selectedIndex = pageOffset > 0 ? pageOffset - 1 : 0;
-  if (selectedIndex < pageOffset) pageOffset = selectedIndex;
-  if (selectedIndex >= pageOffset + PAGE_SIZE) pageOffset = selectedIndex - PAGE_SIZE + 1;
-  for (char key : keys.word) if (key == 's' || key == 'S') startScan();
-  if (keys.enter && !devices.empty()) drawDetailScreen();
+  if (scanning) return;
+  size_t deviceCount = 0;
+  if (!devicesMutex || xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
+  deviceCount = devices.size();
+  const uint8_t visibleRows = std::max<int>(1, std::min<int>(PAGE_SIZE, (M5Cardputer.Display.height() - 60 - 30) / 28));
+  if (deviceCount > 0) {
+    if (keys.up && selectedIndex > 0) --selectedIndex;
+    if (keys.down && selectedIndex + 1 < deviceCount) ++selectedIndex;
+    if (keys.right && selectedIndex + 1 < deviceCount)
+      selectedIndex = std::min<size_t>(deviceCount - 1, pageOffset + visibleRows);
+    if (keys.left && selectedIndex > 0)
+      selectedIndex = pageOffset > 0 ? pageOffset - 1 : 0;
+    if (selectedIndex < pageOffset) pageOffset = selectedIndex;
+    if (selectedIndex >= pageOffset + visibleRows) pageOffset = selectedIndex - visibleRows + 1;
+  }
+  xSemaphoreGive(devicesMutex);
+  for (char key : keys.word) if (key == 's' || key == 'S') { startScan(); return; }
+  if (keys.enter && deviceCount > 0) drawDetailScreen();
+  else drawScanScreen();
 }
 
 void handleDetailKeys(const Keyboard_Class::KeysState &keys) {
@@ -309,9 +362,10 @@ void setup() {
   auto config = M5.config();
   M5Cardputer.begin(config, true);
   M5Cardputer.Display.setRotation(1);
+  devicesMutex = xSemaphoreCreateMutex();
   BLEDevice::init("Cardputer-BLE-Tester");
   scanner = BLEDevice::getScan();
-  scanner->setAdvertisedDeviceCallbacks(new DeviceCallbacks(), true);
+  scanner->setAdvertisedDeviceCallbacks(new DeviceCallbacks(), false);
   scanner->setActiveScan(true);
   scanner->setInterval(100);
   scanner->setWindow(80);
