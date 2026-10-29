@@ -67,6 +67,7 @@ String manufacturerFromData(const std::string &data) {
     case 0x0006: return "Microsoft";
     case 0x000F: return "Broadcom";
     case 0x0075: return "Samsung Electronics";
+    case 0x0157: return "Huami/Amazfit";
     case 0x00E0: return "Google";
     case 0x0059: return "Nordic Semiconductor";
     case 0x038F: return "Xiaomi";
@@ -75,18 +76,14 @@ String manufacturerFromData(const std::string &data) {
   }
 }
 
-String operatingSystemHint(const String &name, const String &manufacturer) {
+String operatingSystemHint(const String &name) {
   String text = name;
   text.toLowerCase();
-  String maker = manufacturer;
-  maker.toLowerCase();
-  if (text.indexOf("iphone") >= 0 || text.indexOf("ipad") >= 0 || maker == "apple")
-    return "Possivel iOS/Apple; incerto";
-  if (text.indexOf("android") >= 0 || text.indexOf("pixel") >= 0 ||
-      maker.indexOf("google") >= 0 || maker.indexOf("samsung") >= 0 ||
-      maker.indexOf("xiaomi") >= 0)
+  if (text.indexOf("iphone") >= 0 || text.indexOf("ipad") >= 0)
+    return "Possivel iOS; incerto";
+  if (text.indexOf("android") >= 0 || text.indexOf("pixel") >= 0)
     return "Possivel Android; incerto";
-  if (text.indexOf("windows") >= 0 || maker.indexOf("microsoft") >= 0)
+  if (text.indexOf("windows") >= 0)
     return "Possivel Windows; incerto";
   return "SO nao identificavel por BLE";
 }
@@ -96,7 +93,10 @@ String serviceHints(BLEAdvertisedDevice &advertised) {
   const uint8_t count = advertised.getServiceUUIDCount();
   for (uint8_t i = 0; i < count && i < 3; ++i) {
     if (!result.isEmpty()) result += ",";
-    result += advertised.getServiceUUID(i).toString().c_str();
+    String uuid = advertised.getServiceUUID(i).toString().c_str();
+    if (uuid.length() == 36 && uuid.startsWith("0000") && uuid.endsWith("-0000-1000-8000-00805f9b34fb"))
+      uuid = uuid.substring(4, 8);
+    result += uuid;
   }
   if (count > 3) result += ",...";
   return result;
@@ -266,7 +266,7 @@ void onDeviceFound(BLEAdvertisedDevice advertised) {
     entry.name = name;
     entry.manufacturer = manufacturer;
     entry.advertisedServices = services;
-    entry.osHint = operatingSystemHint(name, manufacturer);
+    entry.osHint = operatingSystemHint(name);
     entry.rssi = advertised.getRSSI();
     entry.lastSeen = millis();
     devices.push_back(entry);
@@ -275,7 +275,7 @@ void onDeviceFound(BLEAdvertisedDevice advertised) {
     if (!name.isEmpty()) found->name = name;
     if (!manufacturer.isEmpty()) found->manufacturer = manufacturer;
     if (!services.isEmpty()) found->advertisedServices = services;
-    found->osHint = operatingSystemHint(found->name, found->manufacturer);
+    found->osHint = operatingSystemHint(found->name);
     found->rssi = advertised.getRSSI();
     found->lastSeen = millis();
     scanResultsDirty = true;
