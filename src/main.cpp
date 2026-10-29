@@ -14,6 +14,7 @@ constexpr uint32_t CONNECT_TIMEOUT_MS = 8000;
 constexpr uint32_t RETRY_DELAYS_MS[MAX_CONNECT_ATTEMPTS] = {1000, 2000, 4000};
 constexpr uint16_t COLOR_BG = TFT_BLACK;
 constexpr uint16_t COLOR_MAIN = TFT_GREEN;
+constexpr uint16_t COLOR_FOUND = TFT_RED;
 constexpr uint16_t COLOR_DIM = TFT_DARKGREEN;
 constexpr uint16_t COLOR_WARN = TFT_YELLOW;
 constexpr uint16_t COLOR_ERROR = TFT_RED;
@@ -63,25 +64,38 @@ void drawScanScreen() {
   auto &d = M5Cardputer.Display;
   d.setTextColor(scanning ? COLOR_WARN : COLOR_DIM, COLOR_BG);
   d.drawString(scanning ? "Escaneando anuncios..." : String(devices.size()) + " encontrados", 8, 46);
+  const int screenHeight = d.height();
+  const int listTop = 60;
+  const int footerY = screenHeight - 30;
+  const int rowStep = 28;
+  const uint8_t visibleRows = footerY > listTop
+      ? std::min<int>(PAGE_SIZE, (footerY - listTop) / rowStep)
+      : 1;
   const uint8_t begin = pageOffset;
-  const uint8_t end = std::min<size_t>(devices.size(), begin + PAGE_SIZE);
+  const uint8_t end = std::min<size_t>(devices.size(), begin + visibleRows);
   for (uint8_t i = begin; i < end; ++i) {
     const DeviceEntry &entry = devices[i];
     const bool selected = i == selectedIndex;
-    d.setTextColor(selected ? COLOR_BG : COLOR_MAIN, selected ? COLOR_MAIN : COLOR_BG);
+    d.setTextColor(selected ? COLOR_BG : COLOR_FOUND, selected ? COLOR_FOUND : COLOR_BG);
     String name = entry.name.isEmpty() ? "(sem nome anunciado)" : entry.name;
     if (name.length() > 22) name = name.substring(0, 21) + "~";
     char row[48];
     snprintf(row, sizeof(row), "%c %-22s %4d", selected ? '>' : ' ', name.c_str(), entry.rssi);
-    d.drawString(row, 8, 64 + (i - begin) * 18);
+    const int y = listTop + (i - begin) * rowStep;
+    d.drawString(row, 8, y);
     d.setTextColor(COLOR_DIM, COLOR_BG);
-    d.drawString(shortAddress(entry.address), 22, 76 + (i - begin) * 18);
+    d.drawString(shortAddress(entry.address), 22, y + 12);
+  }
+  if (devices.size() > visibleRows) {
+    d.setTextColor(COLOR_WARN, COLOR_BG);
+    d.drawString("Pagina " + String(pageOffset / visibleRows + 1) + "/" +
+                     String((devices.size() + visibleRows - 1) / visibleRows),
+                 d.width() - 62, 46);
   }
   d.setTextColor(COLOR_WARN, COLOR_BG);
-  d.drawString(statusMessage, 8, 181);
+  d.drawString(statusMessage, 8, footerY);
   d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("S buscar  Enter abrir  ^v mover", 8, 202);
-  d.drawString("< > pagina  Esc cancelar/voltar", 8, 216);
+  d.drawString("S buscar  Enter abrir  ^v mover", 8, screenHeight - 16);
 }
 
 void drawDetailScreen() {
@@ -233,21 +247,32 @@ void startScan() {
   scanning = true;
   statusMessage = "Busca BLE em andamento";
   drawScanScreen();
-  scanner->clearResults();
-  scanner->start(SCAN_SECONDS, false);
+  const bool started = scanner->start(SCAN_SECONDS, nullptr, false);
+  if (!started) {
+    scanning = false;
+    statusMessage = "Falha ao iniciar BLE; reinicie";
+    drawScanScreen();
+    return;
+  }
+
   const uint32_t start = millis();
-  while (millis() - start < SCAN_SECONDS * 1000UL + 2000UL) {
+  while (millis() - start < SCAN_SECONDS * 1000UL + 1500UL) {
     M5Cardputer.update();
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
       const auto keys = M5Cardputer.Keyboard.keysState();
-      if (keys.esc || keys.del) scanner->stop();
+      if (keys.esc || keys.del) {
+        scanner->stop();
+        break;
+      }
     }
     drawScanScreen();
     delay(40);
   }
   scanner->stop();
   scanning = false;
-  statusMessage = devices.empty() ? "Nenhum anuncio BLE detectado" : "Busca concluida";
+  statusMessage = devices.empty()
+      ? "Nada anunciado: ative BLE no aparelho"
+      : "Busca concluida - selecione um alvo";
   drawScanScreen();
 }
 
