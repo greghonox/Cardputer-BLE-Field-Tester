@@ -106,6 +106,14 @@ String visibleOrDash(const String &value) {
   return value.isEmpty() ? "-" : value;
 }
 
+void drawScanScreen();
+void drawDetailScreen();
+void drawTestScreen(const String &message, uint8_t attempt);
+void disconnectDevice();
+void runConnectionTest();
+void runBulkConnectionTest();
+bool tryConnectAddress(const String &addressText);
+
 void drawHeader(const char *title) {
   auto &d = M5Cardputer.Display;
   d.fillScreen(COLOR_BG);
@@ -170,7 +178,7 @@ void drawScanScreen() {
   d.setTextColor(COLOR_WARN, COLOR_BG);
   d.drawString(statusMessage, 8, footerY);
   d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("^v seleciona  Enter detalhes  S busca", 8, screenHeight - 16);
+  d.drawString("S buscar  A todos  Enter detalles", 8, screenHeight - 16);
 }
 
 void drawDetailScreen() {
@@ -288,6 +296,12 @@ class DeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice advertised) override { onDeviceFound(advertised); }
 };
 
+bool tryConnectAddress(const String &addressText) {
+  BLEAddress address(addressText.c_str());
+  if (!client) client = BLEDevice::createClient();
+  return client->connect(address);
+}
+
 bool tryConnect() {
   if (selectedIndex >= devices.size()) return false;
   selectedAddress = devices[selectedIndex].address;
@@ -296,12 +310,30 @@ bool tryConnect() {
   return client->connect(address);
 }
 
+void drawBulkTestScreen(const String &targetName, uint8_t current, uint8_t total, const String &message) {
+  drawHeader("TESTE EM LOTE");
+  auto &d = M5Cardputer.Display;
+  d.setTextColor(COLOR_MAIN, COLOR_BG);
+  d.drawString("Alvo " + String(current) + "/" + String(total), 8, 58);
+  String name = targetName.isEmpty() ? "(sem nome)" : targetName;
+  if (name.length() > 36) name = name.substring(0, 35) + "~";
+  d.drawString(name, 8, 80);
+  d.setTextColor(COLOR_WARN, COLOR_BG);
+  d.drawString(message, 8, 108);
+  d.setTextColor(COLOR_DIM, COLOR_BG);
+  d.drawString("Esc: cancelar lote", 8, 216);
+}
+
 bool isCancelPressed() {
   M5Cardputer.update();
   if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) return false;
   const auto keys = M5Cardputer.Keyboard.keysState();
   return keys.enter || keys.del || keys.esc;
 }
+
+void runConnectionTest();
+void runBulkConnectionTest();
+void disconnectDevice();
 
 void runConnectionTest() {
   if (devices.empty() || selectedIndex >= devices.size()) return;
@@ -334,6 +366,83 @@ void runConnectionTest() {
   drawTestScreen(statusMessage, connectAttempts);
   delay(800);
   drawDetailScreen();
+}
+
+void runBulkConnectionTest() {
+  std::vector<DeviceEntry> targets;
+  if (!devicesMutex || xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    statusMessage = "Lista ocupada; tente novamente";
+    drawScanScreen();
+    return;
+  }
+  targets = devices;
+  xSemaphoreGive(devicesMutex);
+  if (targets.empty()) {
+    statusMessage = "Nenhum dispositivo para testar";
+    drawScanScreen();
+    return;
+  }
+
+  if (connected) disconnectDevice();
+  uint8_t successfulConnections = 0;
+  size_t attemptedTargets = 0;
+  bool cancelled = false;
+  for (size_t index = 0; index < targets.size(); ++index) {
+    selectedIndex = index;
+    selectedAddress = targets[index].address;
+    ++attemptedTargets;
+    bool connectedThisTarget = false;
+    for (uint8_t attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS; ++attempt) {
+      drawBulkTestScreen(targets[index].name, index + 1, targets.size(),
+                         "Conectando " + String(attempt) + "/" + String(MAX_CONNECT_ATTEMPTS));
+      if (tryConnectAddress(selectedAddress)) {
+        connectedThisTarget = true;
+        ++successfulConnections;
+        drawBulkTestScreen(targets[index].name, index + 1, targets.size(), "Conectou; desconectando...");
+        delay(500);
+        client->disconnect();
+        connected = false;
+        servicesReady = false;
+        break;
+      }
+      connected = false;
+      if (attempt < MAX_CONNECT_ATTEMPTS) {
+        const uint32_t waitMs = RETRY_DELAYS_MS[attempt - 1];
+        drawBulkTestScreen(targets[index].name, index + 1, targets.size(),
+                           "Falhou; tenta de novo em " + String(waitMs / 1000) + "s");
+        const uint32_t startedAt = millis();
+        while (millis() - startedAt < waitMs) {
+          if (isCancelPressed()) { cancelled = true; break; }
+          delay(10);
+        }
+        if (cancelled) break;
+      }
+    }
+    if (cancelled) break;
+  }
+
+  if (client && client->isConnected()) client->disconnect();
+  connected = false;
+  servicesReady = false;
+  statusMessage = cancelled
+      ? "Lote cancelado: " + String(successfulConnections) + " conectaram"
+      : String(successfulConnections) + "/" + String(targets.size()) + " conectaram";
+  drawHeader("RESULTADO DO TESTE");
+  auto &d = M5Cardputer.Display;
+  d.setTextColor(COLOR_WARN, COLOR_BG);
+  d.drawString(statusMessage, 8, 70);
+  d.setTextColor(COLOR_DIM, COLOR_BG);
+  d.drawString("Testados: " + String(attemptedTargets) + "/" + String(targets.size()), 8, 98);
+  d.drawString("Enter/Esc: voltar a lista", 8, 216);
+  while (true) {
+    M5Cardputer.update();
+    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
+      const auto keys = M5Cardputer.Keyboard.keysState();
+      if (keys.enter || keys.esc || keys.del) break;
+    }
+    delay(10);
+  }
+  drawScanScreen();
 }
 
 void disconnectDevice() {
@@ -430,7 +539,10 @@ void handleScanKeys(const Keyboard_Class::KeysState &keys) {
     drawScanScreen();
     return;
   }
-  for (char key : keys.word) if (key == 's' || key == 'S') { startScan(); return; }
+  for (char key : keys.word) {
+    if (key == 's' || key == 'S') { startScan(); return; }
+    if (key == 'a' || key == 'A') { runBulkConnectionTest(); return; }
+  }
   if (keys.enter && deviceCount > 0) drawDetailScreen();
 }
 

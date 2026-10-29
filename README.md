@@ -1,6 +1,6 @@
 # BLE Field Tester — Cardputer-Adv
 
-Projeto independente para o M5Stack Cardputer-Adv (ESP32-S3). Faz varredura de anúncios Bluetooth Low Energy (BLE), permite escolher um dispositivo, testar conexão com limite de tentativas e inspecionar serviços GATT. Não tenta conexão automática com todos os aparelhos e não escreve características.
+Projeto independente para o M5Stack Cardputer-Adv (ESP32-S3). Faz varredura de anúncios Bluetooth Low Energy (BLE), permite escolher um dispositivo, testar conexão com limite de tentativas e inspecionar serviços GATT. O menu `A` tenta conectar sequencialmente a cada aparelho encontrado, desconecta após cada conexão bem-sucedida e não escreve características.
 
 ## Requisitos
 
@@ -28,11 +28,13 @@ Interface em orientação horizontal, com fundo preto e tema Matrix. O texto de 
 │ 01:02:03:04:05:06                  │
 │                                      │
 │ Busca concluida - selecione um alvo  │
-│ S buscar  Enter abrir  ^v mover      │
+│ S buscar  A testar todos  Enter abrir│
 └──────────────────────────────────────┘
 ```
 
-**Como usar:** pressione `S` para iniciar uma busca BLE de aproximadamente cinco segundos. `Esc` ou `Del` cancela. Ao terminar, a primeira linha fica selecionada; use `↑`/`↓` para mover o destaque (a linha selecionada aparece com fundo vermelho) e `Enter` para abrir os detalhes desse aparelho. Cada linha mostra nome anunciado, RSSI e endereço BLE completo. Se houver mais dispositivos que linhas disponíveis, `←`/`→` leva ao item anterior/próximo bloco e o destaque acompanha a mudança. Sem resultados, confirme que o periférico está ligado, próximo e anunciando BLE; aparelhos Bluetooth clássico não aparecem. RSSI mais próximo de zero costuma indicar sinal mais forte, mas não mede distância com precisão.
+**Como usar:** pressione `S` para iniciar uma busca BLE de aproximadamente cinco segundos. `Esc` ou `Del` cancela. Ao terminar, a primeira linha fica selecionada; use `↑`/`↓` para mover o destaque (a linha selecionada aparece com fundo vermelho) e `Enter` para abrir os detalhes desse aparelho. Pressione `A` para testar conexão sequencialmente com todos os dispositivos encontrados. Cada linha mostra nome anunciado, RSSI e endereço BLE completo. Se houver mais dispositivos que linhas disponíveis, `←`/`→` leva ao item anterior/próximo bloco e o destaque acompanha a mudança. Sem resultados, confirme que o periférico está ligado, próximo e anunciando BLE; aparelhos Bluetooth clássico não aparecem. RSSI mais próximo de zero costuma indicar sinal mais forte, mas não mede distância com precisão.
+
+**Teste em lote (`A`):** o Cardputer tenta cada endereço um por um, faz até três tentativas por alvo e desconecta após cada conexão bem-sucedida antes de continuar. A tecla `Esc` cancela durante as pausas. No final, mostra quantos dispositivos aceitaram conexão. O teste pode interromper temporariamente a conexão BLE já existente de outro cliente; use apenas com dispositivos próprios ou autorizados. Não há pareamento, leitura/escrita GATT ou comandos enviados aos aparelhos.
 
 ### 2. Detalhes do dispositivo
 
@@ -114,6 +116,7 @@ Na tela de detalhes, além do nome/endereço/RSSI, mostramos fabricante inferido
 ## Navegação
 
 - `S`: iniciar varredura BLE de 5 segundos.
+- `A`: testar conexão com todos os dispositivos encontrados, em sequência; desconecta após cada êxito.
 - Setas: selecionar dispositivo; `Enter`: abrir detalhes / iniciar conexão.
 - Na tela de detalhes: `C` conectar; `G` descobrir serviços GATT; `X` desconectar.
 - `Esc`: voltar/cancelar quando disponível.
