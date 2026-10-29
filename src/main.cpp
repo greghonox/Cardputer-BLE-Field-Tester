@@ -11,6 +11,7 @@
 #include <freertos/semphr.h>
 
 namespace {
+constexpr const char *FIRMWARE_VERSION = "v1.1.0";
 constexpr uint32_t SCAN_SECONDS = 5;
 constexpr uint8_t MAX_CONNECT_ATTEMPTS = 3;
 constexpr uint32_t CONNECT_TIMEOUT_MS = 8000;
@@ -121,6 +122,8 @@ void drawHeader(const char *title) {
   d.setTextSize(1);
   d.setTextColor(COLOR_MAIN, COLOR_BG);
   d.drawString("[ BLE FIELD TESTER ]", 8, 5);
+  d.setTextColor(COLOR_WARN, COLOR_BG);
+  d.drawString(FIRMWARE_VERSION, d.width() - 62, 5);
   d.setTextColor(COLOR_DIM, COLOR_BG);
   d.drawString("------------------------------", 8, 18);
   d.setTextColor(COLOR_MAIN, COLOR_BG);

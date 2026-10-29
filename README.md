@@ -2,6 +2,8 @@
 
 Projeto independente para o M5Stack Cardputer-Adv (ESP32-S3). Faz varredura de anúncios Bluetooth Low Energy (BLE), permite escolher um dispositivo, testar conexão com limite de tentativas e inspecionar serviços GATT. O menu `A` tenta conectar sequencialmente a cada aparelho encontrado, desconecta após cada conexão bem-sucedida e não escreve características.
 
+Versão exibida no topo de todas as telas: `v1.1.0`.
+
 ## Requisitos
 
 - M5Stack Cardputer-Adv.
@@ -15,7 +17,7 @@ Interface em orientação horizontal, com fundo preto e tema Matrix. O texto de 
 
 ```text
 ┌──────────────────────────────────────┐
-│ [ BLE FIELD TESTER ]                 │
+│ [ BLE FIELD TESTER ]          v1.1.0  │
 │ ------------------------------       │
 │ DISPOSITIVOS PROXIMOS                │
 │ 3 encontrados                        │
@@ -58,7 +60,7 @@ Na tela de detalhes, além do nome/endereço/RSSI, mostramos fabricante inferido
 
 ```text
 ┌──────────────────────────────────────┐
-│ [ BLE FIELD TESTER ]                 │
+│ [ BLE FIELD TESTER ]          v1.1.0  │
 │ ------------------------------       │
 │ DETALHE DO DISPOSITIVO               │
 │ Nome: Sensor bancada                 │
@@ -81,7 +83,7 @@ Na tela de detalhes, além do nome/endereço/RSSI, mostramos fabricante inferido
 
 ```text
 ┌──────────────────────────────────────┐
-│ [ BLE FIELD TESTER ]                 │
+│ [ BLE FIELD TESTER ]          v1.1.0  │
 │ ------------------------------       │
 │ TESTE DE CONEXAO                     │
 │ Alvo: aa:bb:cc:dd:ee:ff               │
@@ -99,7 +101,7 @@ Na tela de detalhes, além do nome/endereço/RSSI, mostramos fabricante inferido
 
 ```text
 ┌──────────────────────────────────────┐
-│ [ BLE FIELD TESTER ]                 │
+│ [ BLE FIELD TESTER ]          v1.1.0  │
 │ ------------------------------       │
 │ SERVICOS GATT                        │
 │ 1. 00001800-0000-1000-8000-...       │
