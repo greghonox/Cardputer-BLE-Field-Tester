@@ -38,6 +38,24 @@ Interface em orientação horizontal, com fundo preto e tema Matrix. O texto de 
 
 ```text
 ┌──────────────────────────────────────┐
+│ DETALHE DO DISPOSITIVO               │
+│ Nome: Sensor ou (nao anunciado)      │
+│ Endereco: aa:bb:cc:dd:ee:ff          │
+│ Sinal: -48 dBm                       │
+│ Visto: 1s atras                      │
+│ Fab: Apple / Samsung / ID            │
+│ SO: possivel; nao confirmado         │
+│ Svc: UUID BLE anunciado              │
+│ Estado: DESCONECTADO                 │
+│ C conectar  G servicos  X desconectar│
+└──────────────────────────────────────┘
+```
+
+Na tela de detalhes, além do nome/endereço/RSSI, mostramos fabricante inferido pelo Company ID no anúncio, alguns UUIDs de serviços anunciados e uma pista heurística de SO. O SO é apenas uma hipótese; BLE não permite identificar com certeza o sistema operacional e muitos anúncios não carregam essas informações. `G` continua descobrindo serviços GATT apenas após conectar.
+
+
+```text
+┌──────────────────────────────────────┐
 │ [ BLE FIELD TESTER ]                 │
 │ ------------------------------       │
 │ DETALHE DO DISPOSITIVO               │

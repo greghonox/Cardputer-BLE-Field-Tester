@@ -4,6 +4,7 @@
 #include <BLEAdvertisedDevice.h>
 #include <BLEClient.h>
 #include <BLEUtils.h>
+#include <esp_bt_device.h>
 #include <algorithm>
 #include <vector>
 #include <freertos/FreeRTOS.h>
@@ -25,6 +26,9 @@ constexpr uint8_t PAGE_SIZE = 6;
 struct DeviceEntry {
   String address;
   String name;
+  String manufacturer;
+  String advertisedServices;
+  String osHint;
   int rssi = -127;
   uint32_t lastSeen = 0;
 };
@@ -48,6 +52,59 @@ uint8_t connectAttempts = 0;
 uint32_t retryAt = 0;
 String statusMessage = "Pronto para buscar";
 String selectedAddress;
+
+std::string manufacturerData(BLEAdvertisedDevice &advertised) {
+  if (advertised.haveManufacturerData()) return advertised.getManufacturerData();
+  return std::string();
+}
+
+String manufacturerFromData(const std::string &data) {
+  if (data.size() < 2) return "";
+  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data.data());
+  const uint16_t companyId = bytes[0] | (static_cast<uint16_t>(bytes[1]) << 8);
+  switch (companyId) {
+    case 0x004C: return "Apple";
+    case 0x0006: return "Microsoft";
+    case 0x000F: return "Broadcom";
+    case 0x0075: return "Samsung Electronics";
+    case 0x00E0: return "Google";
+    case 0x0059: return "Nordic Semiconductor";
+    case 0x038F: return "Xiaomi";
+    case 0x02E5: return "Espressif";
+    default: return "ID 0x" + String(companyId, HEX);
+  }
+}
+
+String operatingSystemHint(const String &name, const String &manufacturer) {
+  String text = name;
+  text.toLowerCase();
+  String maker = manufacturer;
+  maker.toLowerCase();
+  if (text.indexOf("iphone") >= 0 || text.indexOf("ipad") >= 0 || maker == "apple")
+    return "Possivel iOS/Apple; incerto";
+  if (text.indexOf("android") >= 0 || text.indexOf("pixel") >= 0 ||
+      maker.indexOf("google") >= 0 || maker.indexOf("samsung") >= 0 ||
+      maker.indexOf("xiaomi") >= 0)
+    return "Possivel Android; incerto";
+  if (text.indexOf("windows") >= 0 || maker.indexOf("microsoft") >= 0)
+    return "Possivel Windows; incerto";
+  return "SO nao identificavel por BLE";
+}
+
+String serviceHints(BLEAdvertisedDevice &advertised) {
+  String result;
+  const uint8_t count = advertised.getServiceUUIDCount();
+  for (uint8_t i = 0; i < count && i < 3; ++i) {
+    if (!result.isEmpty()) result += ",";
+    result += advertised.getServiceUUID(i).toString().c_str();
+  }
+  if (count > 3) result += ",...";
+  return result;
+}
+
+String visibleOrDash(const String &value) {
+  return value.isEmpty() ? "-" : value;
+}
 
 void drawHeader(const char *title) {
   auto &d = M5Cardputer.Display;
@@ -128,18 +185,30 @@ void drawDetailScreen() {
   const DeviceEntry entry = devices[selectedIndex];
   xSemaphoreGive(devicesMutex);
   d.setTextColor(COLOR_MAIN, COLOR_BG);
-  d.drawString(entry.name.isEmpty() ? "Nome: (nao anunciado)" : "Nome: " + entry.name, 8, 51);
+  String name = entry.name.isEmpty() ? "Nome: (nao anunciado)" : "Nome: " + entry.name;
+  if (name.length() > 36) name = name.substring(0, 35) + "~";
+  d.drawString(name, 8, 51);
   d.drawString("Endereco: " + entry.address, 8, 69);
   d.drawString("Sinal: " + String(entry.rssi) + " dBm", 8, 87);
   d.drawString("Visto: " + String((millis() - entry.lastSeen) / 1000) + "s atras", 8, 105);
+  d.setTextColor(COLOR_WARN, COLOR_BG);
+  String manufacturerLine = "Fab: " + visibleOrDash(entry.manufacturer);
+  if (manufacturerLine.length() > 38) manufacturerLine = manufacturerLine.substring(0, 37) + "~";
+  d.drawString(manufacturerLine, 8, 123);
+  String osLine = entry.osHint;
+  if (osLine.length() > 38) osLine = osLine.substring(0, 37) + "~";
+  d.drawString("SO: " + osLine, 8, 141);
+  String serviceLine = "Svc: " + visibleOrDash(entry.advertisedServices);
+  if (serviceLine.length() > 38) serviceLine = serviceLine.substring(0, 37) + "~";
+  d.drawString(serviceLine, 8, 159);
   d.setTextColor(connected ? COLOR_MAIN : COLOR_WARN, COLOR_BG);
-  d.drawString(connected ? "Estado: CONECTADO" : "Estado: DESCONECTADO", 8, 127);
+  d.drawString(connected ? "Estado: CONECTADO" : "Estado: DESCONECTADO", 8, 177);
   d.setTextColor(COLOR_MAIN, COLOR_BG);
-  d.drawString("> C  Conectar / testar", 8, 151);
-  d.drawString("  G  Descobrir servicos GATT", 8, 169);
-  d.drawString("  X  Desconectar", 8, 187);
+  d.drawString("> C  Conectar / testar", 8, 195);
+  d.drawString("  G  Descobrir servicos GATT", 8, 213);
+  d.drawString("X desconectar", 8, 231);
   d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("Enter: conectar  G: GATT  Esc: voltar", 8, 216);
+  d.drawString("Esc: voltar", 8, 249);
 }
 
 void drawTestScreen(const String &message, uint8_t attempt) {
@@ -188,18 +257,28 @@ void onDeviceFound(BLEAdvertisedDevice advertised) {
   auto found = std::find_if(devices.begin(), devices.end(), [&](const DeviceEntry &item) {
     return item.address == address;
   });
+  const String name = advertised.haveName() ? String(advertised.getName().c_str()) : "";
+  const String manufacturer = manufacturerFromData(manufacturerData(advertised));
+  const String services = serviceHints(advertised);
   if (found == devices.end()) {
     DeviceEntry entry;
     entry.address = address;
-    entry.name = advertised.haveName() ? String(advertised.getName().c_str()) : "";
+    entry.name = name;
+    entry.manufacturer = manufacturer;
+    entry.advertisedServices = services;
+    entry.osHint = operatingSystemHint(name, manufacturer);
     entry.rssi = advertised.getRSSI();
     entry.lastSeen = millis();
     devices.push_back(entry);
     scanResultsDirty = true;
   } else {
-    if (advertised.haveName()) found->name = advertised.getName().c_str();
+    if (!name.isEmpty()) found->name = name;
+    if (!manufacturer.isEmpty()) found->manufacturer = manufacturer;
+    if (!services.isEmpty()) found->advertisedServices = services;
+    found->osHint = operatingSystemHint(found->name, found->manufacturer);
     found->rssi = advertised.getRSSI();
     found->lastSeen = millis();
+    scanResultsDirty = true;
   }
   xSemaphoreGive(devicesMutex);
 }
