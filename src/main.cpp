@@ -11,18 +11,18 @@
 #include <freertos/semphr.h>
 
 namespace {
-constexpr const char *FIRMWARE_VERSION = "v1.1.0";
+constexpr const char *FIRMWARE_VERSION = "v1.5.0";
 constexpr uint32_t SCAN_SECONDS = 5;
 constexpr uint8_t MAX_CONNECT_ATTEMPTS = 3;
-constexpr uint32_t CONNECT_TIMEOUT_MS = 8000;
-constexpr uint32_t RETRY_DELAYS_MS[MAX_CONNECT_ATTEMPTS] = {1000, 2000, 4000};
-constexpr uint16_t COLOR_BG = TFT_BLACK;
-constexpr uint16_t COLOR_MAIN = TFT_GREEN;
-constexpr uint16_t COLOR_FOUND = TFT_RED;
-constexpr uint16_t COLOR_DIM = TFT_DARKGREEN;
-constexpr uint16_t COLOR_WARN = TFT_YELLOW;
-constexpr uint16_t COLOR_ERROR = TFT_RED;
+constexpr uint32_t CONNECT_TIMEOUT_MS = 5000;
+constexpr uint32_t BULK_NEXT_DEVICE_DELAY_MS = 300;
 constexpr uint8_t PAGE_SIZE = 6;
+constexpr uint16_t COLOR_BG = 0x0081;        // fundo #06110B
+constexpr uint16_t COLOR_MAIN = 0x7FFF;      // texto #7CFF9B
+constexpr uint16_t COLOR_FOUND = 0x1347;     // selecao #176B38
+constexpr uint16_t COLOR_DIM = 0x2388;       // paineis #277044
+constexpr uint16_t COLOR_WARN = 0xF6AB;    // amarelo para avisos
+constexpr uint16_t COLOR_ERROR = 0xF800;
 
 struct DeviceEntry {
   String address;
@@ -115,24 +115,37 @@ void runConnectionTest();
 void runBulkConnectionTest();
 bool tryConnectAddress(const String &addressText);
 
+void drawFooter(const char *hints) {
+  auto &d = M5Cardputer.Display;
+  const int footerY = d.height() - 22;
+  d.fillRect(0, footerY, d.width(), 22, COLOR_DIM);
+  d.fillRect(0, footerY, d.width(), 1, COLOR_MAIN);
+  d.setTextColor(COLOR_MAIN, COLOR_DIM);
+  d.drawString(hints, 8, footerY + 6);
+}
+
 void drawHeader(const char *title) {
   auto &d = M5Cardputer.Display;
   d.fillScreen(COLOR_BG);
+  d.fillRect(0, 0, d.width(), 26, COLOR_DIM);
+  d.fillRect(0, 27, d.width(), 1, COLOR_MAIN);
   d.setTextDatum(top_left);
   d.setTextSize(1);
-  d.setTextColor(COLOR_MAIN, COLOR_BG);
+  d.setTextColor(COLOR_MAIN, COLOR_DIM);
   d.drawString("[ BLE FIELD TESTER ]", 8, 5);
-  d.setTextColor(COLOR_WARN, COLOR_BG);
+  d.setTextColor(COLOR_WARN, COLOR_DIM);
   d.drawString(FIRMWARE_VERSION, d.width() - 62, 5);
-  d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("------------------------------", 8, 18);
   d.setTextColor(COLOR_MAIN, COLOR_BG);
-  d.drawString(title, 8, 30);
+  d.drawString(title, 8, 32);
 }
 
 uint8_t visibleDeviceRows() {
-  const int available = M5Cardputer.Display.height() - 60 - 30;
-  return std::max<int>(1, std::min<int>(PAGE_SIZE, available / 28));
+  auto &d = M5Cardputer.Display;
+  const int listTop = 82;
+  const int rowStep = 24;
+  const int listBottom = d.height() - 54;
+  const int available = listBottom - listTop;
+  return std::max<int>(1, std::min<int>(PAGE_SIZE, (available + rowStep - 1) / rowStep));
 }
 
 void drawScanScreen() {
@@ -152,17 +165,17 @@ void drawScanScreen() {
     if (selectedIndex >= pageOffset + visibleRows) pageOffset = selectedIndex - visibleRows + 1;
   }
   d.setTextColor(scanning ? COLOR_WARN : COLOR_DIM, COLOR_BG);
-  d.drawString(scanning ? "Escaneando anuncios..." : String(deviceCount) + " encontrados", 8, 46);
+  d.drawString(scanning ? "Escaneando anuncios..." : String(deviceCount) + " encontrados", 8, 62);
   const int screenHeight = d.height();
-  const int listTop = 60;
-  const int footerY = screenHeight - 30;
-  const int rowStep = 28;
+  const int listTop = 82;
+  const int footerY = screenHeight - 54;
+  const int rowStep = 24;
   const uint8_t begin = pageOffset;
   const uint8_t end = std::min<size_t>(deviceCount, begin + visibleRows);
   for (uint8_t i = begin; i < end; ++i) {
     const DeviceEntry &entry = snapshot[i];
     const bool selected = i == selectedIndex;
-    d.setTextColor(selected ? COLOR_BG : COLOR_FOUND, selected ? COLOR_FOUND : COLOR_BG);
+    d.setTextColor(selected ? COLOR_MAIN : COLOR_FOUND, selected ? COLOR_FOUND : COLOR_BG);
     String name = entry.name.isEmpty() ? "(sem nome anunciado)" : entry.name;
     if (name.length() > 22) name = name.substring(0, 21) + "~";
     char row[48];
@@ -180,8 +193,7 @@ void drawScanScreen() {
   }
   d.setTextColor(COLOR_WARN, COLOR_BG);
   d.drawString(statusMessage, 8, footerY);
-  d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("S buscar  A todos  Enter detalles", 8, screenHeight - 16);
+  drawFooter("S buscar  A todos  Enter detalhes");
 }
 
 void drawDetailScreen() {
@@ -196,8 +208,9 @@ void drawDetailScreen() {
   const DeviceEntry entry = devices[selectedIndex];
   xSemaphoreGive(devicesMutex);
   d.setTextColor(COLOR_MAIN, COLOR_BG);
+  const int maxChars = std::max(1, (d.width() - 16) / 6);
   String name = entry.name.isEmpty() ? "Nome: (nao anunciado)" : "Nome: " + entry.name;
-  if (name.length() > 36) name = name.substring(0, 35) + "~";
+  if (name.length() > maxChars) name = name.substring(0, maxChars - 1) + "~";
   d.drawString(name, 8, 51);
   d.drawString("Endereco: " + entry.address, 8, 69);
   d.drawString("Sinal: " + String(entry.rssi) + " dBm", 8, 87);
@@ -213,13 +226,8 @@ void drawDetailScreen() {
   if (serviceLine.length() > 38) serviceLine = serviceLine.substring(0, 37) + "~";
   d.drawString(serviceLine, 8, 159);
   d.setTextColor(connected ? COLOR_MAIN : COLOR_WARN, COLOR_BG);
-  d.drawString(connected ? "Estado: CONECTADO" : "Estado: DESCONECTADO", 8, 177);
-  d.setTextColor(COLOR_MAIN, COLOR_BG);
-  d.drawString("> C  Conectar / testar", 8, 195);
-  d.drawString("  G  Descobrir servicos GATT", 8, 213);
-  d.drawString("X desconectar", 8, 231);
-  d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("Esc: voltar", 8, 249);
+  d.drawString(connected ? "Estado: CONECTADO" : "Estado: DESCONECTADO", 8, 195);
+  drawFooter("C conectar  G servicos  X desconectar");
 }
 
 void drawTestScreen(const String &message, uint8_t attempt) {
@@ -230,8 +238,7 @@ void drawTestScreen(const String &message, uint8_t attempt) {
   d.setTextColor(COLOR_WARN, COLOR_BG);
   d.drawString("Tentativa " + String(attempt) + "/" + String(MAX_CONNECT_ATTEMPTS), 8, 82);
   d.drawString(message, 8, 104);
-  d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("Enter/Esc: cancelar", 8, 216);
+  drawFooter("ENTER/ESC cancelar teste");
 }
 
 void drawServiceList() {
@@ -258,8 +265,7 @@ void drawServiceList() {
       servicesReady = true;
     }
   }
-  d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("Somente leitura/descoberta; sem escritas", 8, 216);
+  drawFooter("ESC voltar detalhes  DEL lista");
 }
 
 void onDeviceFound(BLEAdvertisedDevice advertised) {
@@ -302,29 +308,29 @@ class DeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
 bool tryConnectAddress(const String &addressText) {
   BLEAddress address(addressText.c_str());
   if (!client) client = BLEDevice::createClient();
-  return client->connect(address);
+  return client->connect(address, BLE_ADDR_TYPE_PUBLIC);
 }
 
 bool tryConnect() {
   if (selectedIndex >= devices.size()) return false;
   selectedAddress = devices[selectedIndex].address;
-  BLEAddress address(selectedAddress.c_str());
-  if (!client) client = BLEDevice::createClient();
-  return client->connect(address);
+  return tryConnectAddress(selectedAddress);
 }
 
-void drawBulkTestScreen(const String &targetName, uint8_t current, uint8_t total, const String &message) {
+void drawBulkTestScreen(const DeviceEntry &target, size_t current, size_t total, const String &message) {
   drawHeader("TESTE EM LOTE");
   auto &d = M5Cardputer.Display;
   d.setTextColor(COLOR_MAIN, COLOR_BG);
-  d.drawString("Alvo " + String(current) + "/" + String(total), 8, 58);
-  String name = targetName.isEmpty() ? "(sem nome)" : targetName;
-  if (name.length() > 36) name = name.substring(0, 35) + "~";
-  d.drawString(name, 8, 80);
-  d.setTextColor(COLOR_WARN, COLOR_BG);
-  d.drawString(message, 8, 108);
+  d.drawString("Alvo " + String(current) + "/" + String(total), 8, 62);
+  String label = target.name.isEmpty() ? target.address : target.name;
+  const int maxChars = std::max(1, (d.width() - 16) / 6);
+  if (label.length() > maxChars) label = label.substring(0, maxChars - 1) + "~";
+  d.drawString(label, 8, 88);
   d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("Esc: cancelar lote", 8, 216);
+  d.drawString("ID: " + target.address, 8, 106);
+  d.setTextColor(COLOR_WARN, COLOR_BG);
+  d.drawString(message, 8, 132);
+  drawFooter("ESC cancela lote");
 }
 
 bool isCancelPressed() {
@@ -334,9 +340,19 @@ bool isCancelPressed() {
   return keys.enter || keys.del || keys.esc;
 }
 
+bool waitForBulkDelay(uint32_t waitMs) {
+  const uint32_t startedAt = millis();
+  while (millis() - startedAt < waitMs) {
+    if (isCancelPressed()) return false;
+    delay(10);
+  }
+  return true;
+}
+
 void runConnectionTest();
 void runBulkConnectionTest();
 void disconnectDevice();
+void drawBulkTestScreen(const DeviceEntry &target, size_t current, size_t total, const String &message);
 
 void runConnectionTest() {
   if (devices.empty() || selectedIndex >= devices.size()) return;
@@ -356,13 +372,6 @@ void runConnectionTest() {
       return;
     }
     if (connectAttempts >= MAX_CONNECT_ATTEMPTS) break;
-    const uint32_t waitMs = RETRY_DELAYS_MS[connectAttempts - 1];
-    drawTestScreen("Falhou; nova tentativa em " + String(waitMs / 1000) + "s", connectAttempts);
-    const uint32_t start = millis();
-    while (millis() - start < waitMs) {
-      if (isCancelPressed()) { autoReconnect = false; break; }
-      delay(10);
-    }
   }
   statusMessage = autoReconnect ? "Falha apos 3 tentativas" : "Teste cancelado";
   autoReconnect = false;
@@ -387,56 +396,59 @@ void runBulkConnectionTest() {
   }
 
   if (connected) disconnectDevice();
-  uint8_t successfulConnections = 0;
   size_t attemptedTargets = 0;
+  size_t successfulTargets = 0;
+  size_t lastSuccessfulIndex = targets.size();
   bool cancelled = false;
   for (size_t index = 0; index < targets.size(); ++index) {
     selectedIndex = index;
     selectedAddress = targets[index].address;
     ++attemptedTargets;
-    bool connectedThisTarget = false;
-    for (uint8_t attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS; ++attempt) {
-      drawBulkTestScreen(targets[index].name, index + 1, targets.size(),
-                         "Conectando " + String(attempt) + "/" + String(MAX_CONNECT_ATTEMPTS));
-      if (tryConnectAddress(selectedAddress)) {
-        connectedThisTarget = true;
-        ++successfulConnections;
-        drawBulkTestScreen(targets[index].name, index + 1, targets.size(), "Conectou; desconectando...");
-        delay(500);
-        client->disconnect();
-        connected = false;
-        servicesReady = false;
+    drawBulkTestScreen(targets[index], index + 1, targets.size(), "Testando alvo...");
+    if (tryConnectAddress(selectedAddress)) {
+      ++successfulTargets;
+      lastSuccessfulIndex = index;
+      drawBulkTestScreen(targets[index], index + 1, targets.size(), "Conectou; seguindo lote");
+      if (client && client->isConnected()) client->disconnect();
+    }
+    connected = false;
+    servicesReady = false;
+    if (index + 1 < targets.size()) {
+      drawBulkTestScreen(targets[index + 1], index + 2, targets.size(),
+                         successfulTargets > 0 ? "Conexao aceita; proximo" : "Falhou; proximo alvo");
+      if (!waitForBulkDelay(BULK_NEXT_DEVICE_DELAY_MS)) {
+        cancelled = true;
         break;
       }
-      connected = false;
-      if (attempt < MAX_CONNECT_ATTEMPTS) {
-        const uint32_t waitMs = RETRY_DELAYS_MS[attempt - 1];
-        drawBulkTestScreen(targets[index].name, index + 1, targets.size(),
-                           "Falhou; tenta de novo em " + String(waitMs / 1000) + "s");
-        const uint32_t startedAt = millis();
-        while (millis() - startedAt < waitMs) {
-          if (isCancelPressed()) { cancelled = true; break; }
-          delay(10);
-        }
-        if (cancelled) break;
-      }
     }
-    if (cancelled) break;
   }
 
   if (client && client->isConnected()) client->disconnect();
   connected = false;
   servicesReady = false;
+  if (lastSuccessfulIndex < targets.size()) {
+    selectedIndex = lastSuccessfulIndex;
+    selectedAddress = targets[lastSuccessfulIndex].address;
+  }
   statusMessage = cancelled
-      ? "Lote cancelado: " + String(successfulConnections) + " conectaram"
-      : String(successfulConnections) + "/" + String(targets.size()) + " conectaram";
+      ? "Lote cancelado: " + String(successfulTargets) + " conectaram"
+      : String(successfulTargets) + "/" + String(targets.size()) + " conectaram";
   drawHeader("RESULTADO DO TESTE");
   auto &d = M5Cardputer.Display;
   d.setTextColor(COLOR_WARN, COLOR_BG);
   d.drawString(statusMessage, 8, 70);
   d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("Testados: " + String(attemptedTargets) + "/" + String(targets.size()), 8, 98);
-  d.drawString("Enter/Esc: voltar a lista", 8, 216);
+  d.drawString("Testados: " + String(attemptedTargets) + "/" + String(targets.size()), 8, 96);
+  d.drawString("Conexoes aceitas: " + String(successfulTargets), 8, 118);
+  if (lastSuccessfulIndex < targets.size()) {
+    String lastName = targets[lastSuccessfulIndex].name.isEmpty()
+        ? targets[lastSuccessfulIndex].address : targets[lastSuccessfulIndex].name;
+    const int maxChars = std::max(1, (d.width() - 16) / 6);
+    if (lastName.length() > maxChars) lastName = lastName.substring(0, maxChars - 1) + "~";
+    d.setTextColor(COLOR_MAIN, COLOR_BG);
+    d.drawString("Ultimo: " + lastName, 8, 140);
+  }
+  drawFooter("ENTER/ESC voltar a lista");
   while (true) {
     M5Cardputer.update();
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
