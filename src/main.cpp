@@ -67,6 +67,11 @@ String shortAddress(const String &address) {
   return address.substring(0, 6) + ".." + address.substring(address.length() - 5);
 }
 
+uint8_t visibleDeviceRows() {
+  const int available = M5Cardputer.Display.height() - 60 - 30;
+  return std::max<int>(1, std::min<int>(PAGE_SIZE, available / 28));
+}
+
 void drawScanScreen() {
   currentScreen = Screen::DeviceList;
   drawHeader(scanning ? "BUSCA BLE ATIVA" : "DISPOSITIVOS PROXIMOS");
@@ -76,59 +81,57 @@ void drawScanScreen() {
     snapshot = devices;
     xSemaphoreGive(devicesMutex);
   }
-  d.setTextColor(scanning ? COLOR_WARN : COLOR_DIM, COLOR_BG);
-  d.drawString(scanning ? "Escaneando anuncios..." : String(snapshot.size()) + " encontrados", 8, 46);
   const size_t deviceCount = snapshot.size();
+  const uint8_t visibleRows = visibleDeviceRows();
   if (deviceCount > 0) {
-    const uint8_t visibleRows = std::max<int>(1, std::min<int>(PAGE_SIZE, (d.height() - 60 - 30) / 28));
     selectedIndex = std::min<size_t>(selectedIndex, deviceCount - 1);
     if (selectedIndex < pageOffset) pageOffset = selectedIndex;
     if (selectedIndex >= pageOffset + visibleRows) pageOffset = selectedIndex - visibleRows + 1;
   }
+  d.setTextColor(scanning ? COLOR_WARN : COLOR_DIM, COLOR_BG);
+  d.drawString(scanning ? "Escaneando anuncios..." : String(deviceCount) + " encontrados", 8, 46);
   const int screenHeight = d.height();
   const int listTop = 60;
   const int footerY = screenHeight - 30;
   const int rowStep = 28;
-  const uint8_t visibleRows = footerY > listTop
-      ? std::min<int>(PAGE_SIZE, (footerY - listTop) / rowStep)
-      : 1;
-  if (devicesMutex && xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-    const size_t deviceCount = devices.size();
-    const uint8_t begin = pageOffset;
-    const uint8_t end = std::min<size_t>(deviceCount, begin + visibleRows);
-    for (uint8_t i = begin; i < end; ++i) {
-      const DeviceEntry &entry = snapshot[i];
-      const bool selected = i == selectedIndex;
-      d.setTextColor(selected ? COLOR_BG : COLOR_FOUND, selected ? COLOR_FOUND : COLOR_BG);
-      String name = entry.name.isEmpty() ? "(sem nome anunciado)" : entry.name;
-      if (name.length() > 22) name = name.substring(0, 21) + "~";
-      char row[48];
-      snprintf(row, sizeof(row), "%c %-22s %4d", selected ? '>' : ' ', name.c_str(), entry.rssi);
-      const int y = listTop + (i - begin) * rowStep;
-      d.drawString(row, 8, y);
-      d.setTextColor(COLOR_DIM, COLOR_BG);
-      d.drawString(shortAddress(entry.address), 22, y + 12);
-    }
-    if (deviceCount > visibleRows) {
-      d.setTextColor(COLOR_WARN, COLOR_BG);
-      d.drawString("Pagina " + String(pageOffset / visibleRows + 1) + "/" +
-                       String((deviceCount + visibleRows - 1) / visibleRows),
-                   d.width() - 62, 46);
-    }
-    xSemaphoreGive(devicesMutex);
+  const uint8_t begin = pageOffset;
+  const uint8_t end = std::min<size_t>(deviceCount, begin + visibleRows);
+  for (uint8_t i = begin; i < end; ++i) {
+    const DeviceEntry &entry = snapshot[i];
+    const bool selected = i == selectedIndex;
+    d.setTextColor(selected ? COLOR_BG : COLOR_FOUND, selected ? COLOR_FOUND : COLOR_BG);
+    String name = entry.name.isEmpty() ? "(sem nome anunciado)" : entry.name;
+    if (name.length() > 22) name = name.substring(0, 21) + "~";
+    char row[48];
+    snprintf(row, sizeof(row), "%c %-22s %4d", selected ? '>' : ' ', name.c_str(), entry.rssi);
+    const int y = listTop + (i - begin) * rowStep;
+    d.drawString(row, 8, y);
+    d.setTextColor(COLOR_DIM, COLOR_BG);
+    d.drawString(shortAddress(entry.address), 22, y + 12);
+  }
+  if (deviceCount > visibleRows) {
+    d.setTextColor(COLOR_WARN, COLOR_BG);
+    d.drawString("Pg " + String(pageOffset / visibleRows + 1) + "/" +
+                     String((deviceCount + visibleRows - 1) / visibleRows),
+                 d.width() - 48, 46);
   }
   d.setTextColor(COLOR_WARN, COLOR_BG);
   d.drawString(statusMessage, 8, footerY);
   d.setTextColor(COLOR_DIM, COLOR_BG);
-  d.drawString("S buscar  Enter abrir  ^v mover", 8, screenHeight - 16);
+  d.drawString("^v seleciona  Enter detalhes  S busca", 8, screenHeight - 16);
 }
 
 void drawDetailScreen() {
   currentScreen = Screen::DeviceDetail;
   drawHeader("DETALHE DO DISPOSITIVO");
   auto &d = M5Cardputer.Display;
-  if (devices.empty() || selectedIndex >= devices.size()) return;
-  const DeviceEntry &entry = devices[selectedIndex];
+  if (!devicesMutex || xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
+  if (devices.empty() || selectedIndex >= devices.size()) {
+    xSemaphoreGive(devicesMutex);
+    return;
+  }
+  const DeviceEntry entry = devices[selectedIndex];
+  xSemaphoreGive(devicesMutex);
   d.setTextColor(COLOR_MAIN, COLOR_BG);
   d.drawString(entry.name.isEmpty() ? "Nome: (nao anunciado)" : "Nome: " + entry.name, 8, 51);
   d.drawString("Endereco: " + entry.address, 8, 69);
@@ -326,23 +329,35 @@ void startScan() {
 void handleScanKeys(const Keyboard_Class::KeysState &keys) {
   if (scanning) return;
   size_t deviceCount = 0;
+  bool selectionChanged = false;
+  bool openDetails = false;
   if (!devicesMutex || xSemaphoreTake(devicesMutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
   deviceCount = devices.size();
-  const uint8_t visibleRows = std::max<int>(1, std::min<int>(PAGE_SIZE, (M5Cardputer.Display.height() - 60 - 30) / 28));
+  const uint8_t visibleRows = visibleDeviceRows();
   if (deviceCount > 0) {
+    const size_t previousIndex = selectedIndex;
     if (keys.up && selectedIndex > 0) --selectedIndex;
     if (keys.down && selectedIndex + 1 < deviceCount) ++selectedIndex;
     if (keys.right && selectedIndex + 1 < deviceCount)
       selectedIndex = std::min<size_t>(deviceCount - 1, pageOffset + visibleRows);
     if (keys.left && selectedIndex > 0)
       selectedIndex = pageOffset > 0 ? pageOffset - 1 : 0;
+    if (keys.enter) openDetails = deviceCount > 0;
     if (selectedIndex < pageOffset) pageOffset = selectedIndex;
     if (selectedIndex >= pageOffset + visibleRows) pageOffset = selectedIndex - visibleRows + 1;
+    selectionChanged = previousIndex != selectedIndex;
   }
   xSemaphoreGive(devicesMutex);
+  if (openDetails) {
+    drawDetailScreen();
+    return;
+  }
+  if (selectionChanged) {
+    drawScanScreen();
+    return;
+  }
   for (char key : keys.word) if (key == 's' || key == 'S') { startScan(); return; }
   if (keys.enter && deviceCount > 0) drawDetailScreen();
-  else drawScanScreen();
 }
 
 void handleDetailKeys(const Keyboard_Class::KeysState &keys) {
