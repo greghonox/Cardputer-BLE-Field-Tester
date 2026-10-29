@@ -7,33 +7,91 @@ Projeto independente para o M5Stack Cardputer-Adv (ESP32-S3). Faz varredura de a
 - M5Stack Cardputer-Adv.
 - Docker disponível para executar o build isolado via PlatformIO.
 
-## Telas
+## Telas e instruções de uso
 
-A interface usa fundo preto e acentos verdes no estilo Matrix. Os dispositivos detectados aparecem em **vermelho**; a seleção atual fica destacada com fundo vermelho. A busca BLE dura cerca de cinco segundos.
+Interface em orientação horizontal, com fundo preto e tema Matrix. O texto de informação/menus usa verde; dispositivos detectados ficam **vermelhos**; a linha selecionada fica com fundo vermelho. Os desenhos abaixo são esquemáticos: nomes, RSSI e endereços variam conforme o aparelho.
 
 ### 1. Lista de dispositivos
 
-Mostra o estado da busca, quantos dispositivos foram encontrados e, para cada anúncio BLE, o nome (ou “sem nome anunciado”), a intensidade do sinal em dBm e o endereço parcialmente oculto. Use as setas para navegar, `Enter` para abrir os detalhes e `S` para buscar novamente. Se houver mais resultados do que cabem na tela, a lista é paginada conforme a tela do aparelho.
+```text
+┌──────────────────────────────────────┐
+│ [ BLE FIELD TESTER ]                 │
+│ ------------------------------       │
+│ DISPOSITIVOS PROXIMOS                │
+│ 3 encontrados                        │
+│                                      │
+│ > Sensor bancada          -48         │
+│   AA:BB:..:12:34                     │
+│   Fone BLE de teste       -67         │
+│   10:20:..:30:40                     │
+│   (sem nome anunciado)     -81        │
+│   01:02:..:03:04                     │
+│                                      │
+│ Busca concluida - selecione um alvo  │
+│ S buscar  Enter abrir  ^v mover      │
+└──────────────────────────────────────┘
+```
 
-Se nenhum dispositivo aparecer, a tela informa que nada foi anunciado. Confirme que o periférico está ligado, próximo e com o BLE/anúncio ativo; um aparelho conectado a outro dispositivo pode deixar de anunciar.
+**Como usar:** confirme que o dispositivo alvo está selecionado e pressione `S`. A busca dura aproximadamente cinco segundos. `Esc` ou `Del` cancela. Depois, use `↑`/`↓` para selecionar e `Enter` para abrir os detalhes. Cada linha mostra o nome anunciado, RSSI em dBm e endereço parcialmente oculto. Sem resultados, confirme que o periférico está ligado, próximo e anunciando BLE; aparelhos Bluetooth clássico não aparecem. Se a quantidade exceder o espaço, use `←`/`→` para navegar pelas páginas. RSSI mais próximo de zero costuma indicar sinal mais forte, mas não mede distância com precisão.
 
 ### 2. Detalhes do dispositivo
 
-Exibe nome, endereço completo, RSSI, tempo desde a última detecção e estado da conexão. Ações disponíveis:
+```text
+┌──────────────────────────────────────┐
+│ [ BLE FIELD TESTER ]                 │
+│ ------------------------------       │
+│ DETALHE DO DISPOSITIVO               │
+│ Nome: Sensor bancada                 │
+│ Endereco: aa:bb:cc:dd:12:34          │
+│ Sinal: -48 dBm                       │
+│ Visto: 1s atras                      │
+│ Estado: DESCONECTADO                 │
+│                                      │
+│ > C  Conectar / testar               │
+│   G  Descobrir servicos GATT         │
+│   X  Desconectar                     │
+│                                      │
+│ Enter: conectar  G: GATT  Esc: voltar│
+└──────────────────────────────────────┘
+```
 
-- `Enter` ou `C`: iniciar o teste de conexão;
-- `G`: descobrir serviços GATT e mostrar quantas características há em cada serviço;
-- `X`: desconectar.
-
-A inspeção é somente de descoberta: não lê nem escreve valores de características, nem envia comandos ao periférico.
+**Como usar:** revise se selecionou o aparelho correto. `Enter` ou `C` inicia o teste de conexão; `G` tenta descobrir serviços GATT (requer conexão); `X` desconecta. `Esc` retorna à lista. Conectar pode interromper a conexão BLE de outro cliente. O programa não pareia, não lê valores e não escreve características.
 
 ### 3. Teste de conexão
 
-Mostra o endereço do dispositivo selecionado, o número da tentativa e o estado atual. São feitas até três tentativas, com esperas progressivas entre falhas. `Enter` ou `Esc` cancela durante a espera; uma conexão pode levar alguns segundos, conforme o periférico.
+```text
+┌──────────────────────────────────────┐
+│ [ BLE FIELD TESTER ]                 │
+│ ------------------------------       │
+│ TESTE DE CONEXAO                     │
+│ Alvo: aa:bb..:12:34                  │
+│                                      │
+│ Tentativa 2/3                        │
+│ Falhou; nova tentativa em 2s         │
+│                                      │
+│ Enter/Esc: cancelar                  │
+└──────────────────────────────────────┘
+```
+
+**Como usar:** aguarde o resultado ou cancele durante o intervalo entre tentativas com `Enter` ou `Esc`. O teste faz no máximo três tentativas, com esperas crescentes. Se conectar, retorna à tela de detalhes com estado `CONECTADO`; em caso de falha, mostra o resultado e retorna aos detalhes. O tempo efetivo depende do periférico.
 
 ### 4. Serviços GATT
 
-Após conectar, mostra até sete serviços anunciados pelo periférico e a quantidade de características em cada serviço. Se nenhum serviço for encontrado, a tela informa isso. Pressione `Esc` para retornar.
+```text
+┌──────────────────────────────────────┐
+│ [ BLE FIELD TESTER ]                 │
+│ ------------------------------       │
+│ SERVICOS GATT                        │
+│ 1. 00001800-0000-1000-8000-...       │
+│    Caracteristicas: 4                │
+│ 2. 00001801-0000-1000-8000-...       │
+│    Caracteristicas: 1                │
+│                                      │
+│ Somente leitura/descoberta; sem ...  │
+└──────────────────────────────────────┘
+```
+
+**Como usar:** na tela de detalhes, pressione `G` para descobrir os serviços. A tela pode mostrar até sete serviços e a quantidade de características de cada um; não lê nem altera valores. Se o aparelho não estiver conectado, ou não expuser serviços, a tela informa a condição. `Esc` retorna aos detalhes sem desconectar.
 
 ## Navegação
 

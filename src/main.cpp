@@ -30,6 +30,8 @@ struct DeviceEntry {
 std::vector<DeviceEntry> devices;
 BLEScan *scanner = nullptr;
 BLEClient *client = nullptr;
+enum class Screen { DeviceList, DeviceDetail, GattServices };
+Screen currentScreen = Screen::DeviceList;
 uint8_t selectedIndex = 0;
 uint8_t pageOffset = 0;
 bool scanning = false;
@@ -60,6 +62,7 @@ String shortAddress(const String &address) {
 }
 
 void drawScanScreen() {
+  currentScreen = Screen::DeviceList;
   drawHeader(scanning ? "BUSCA BLE ATIVA" : "DISPOSITIVOS PROXIMOS");
   auto &d = M5Cardputer.Display;
   d.setTextColor(scanning ? COLOR_WARN : COLOR_DIM, COLOR_BG);
@@ -99,6 +102,7 @@ void drawScanScreen() {
 }
 
 void drawDetailScreen() {
+  currentScreen = Screen::DeviceDetail;
   drawHeader("DETALHE DO DISPOSITIVO");
   auto &d = M5Cardputer.Display;
   if (devices.empty() || selectedIndex >= devices.size()) return;
@@ -131,6 +135,7 @@ void drawTestScreen(const String &message, uint8_t attempt) {
 }
 
 void drawServiceList() {
+  currentScreen = Screen::GattServices;
   drawHeader("SERVICOS GATT");
   auto &d = M5Cardputer.Display;
   if (!connected || !client) {
@@ -318,11 +323,18 @@ void loop() {
   if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
     const auto keys = M5Cardputer.Keyboard.keysState();
     if (keys.esc || keys.del) {
-      if (connected) disconnectDevice();
-      drawScanScreen();
+      if (currentScreen == Screen::GattServices && !devices.empty()) drawDetailScreen();
+      else drawScanScreen();
     } else if (keys.enter || keys.up || keys.down || keys.left || keys.right || !keys.word.empty()) {
-      if (connected && servicesReady) handleDetailKeys(keys);
-      else handleScanKeys(keys);
+      if (currentScreen == Screen::DeviceList) {
+        handleScanKeys(keys);
+      } else if (currentScreen == Screen::DeviceDetail) {
+        handleDetailKeys(keys);
+      } else {
+        for (char key : keys.word) {
+          if (key == 'g' || key == 'G') drawServiceList();
+        }
+      }
     }
   }
   delay(10);
