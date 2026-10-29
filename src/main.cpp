@@ -62,11 +62,6 @@ void drawHeader(const char *title) {
   d.drawString(title, 8, 30);
 }
 
-String shortAddress(const String &address) {
-  if (address.length() <= 11) return address;
-  return address.substring(0, 6) + ".." + address.substring(address.length() - 5);
-}
-
 uint8_t visibleDeviceRows() {
   const int available = M5Cardputer.Display.height() - 60 - 30;
   return std::max<int>(1, std::min<int>(PAGE_SIZE, available / 28));
@@ -107,7 +102,7 @@ void drawScanScreen() {
     const int y = listTop + (i - begin) * rowStep;
     d.drawString(row, 8, y);
     d.setTextColor(COLOR_DIM, COLOR_BG);
-    d.drawString(shortAddress(entry.address), 22, y + 12);
+    d.drawString(entry.address, 22, y + 12);
   }
   if (deviceCount > visibleRows) {
     d.setTextColor(COLOR_WARN, COLOR_BG);
@@ -151,7 +146,7 @@ void drawTestScreen(const String &message, uint8_t attempt) {
   drawHeader("TESTE DE CONEXAO");
   auto &d = M5Cardputer.Display;
   d.setTextColor(COLOR_MAIN, COLOR_BG);
-  d.drawString("Alvo: " + shortAddress(selectedAddress), 8, 58);
+  d.drawString("Alvo: " + selectedAddress, 8, 58);
   d.setTextColor(COLOR_WARN, COLOR_BG);
   d.drawString("Tentativa " + String(attempt) + "/" + String(MAX_CONNECT_ATTEMPTS), 8, 82);
   d.drawString(message, 8, 104);

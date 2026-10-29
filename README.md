@@ -21,18 +21,18 @@ Interface em orientação horizontal, com fundo preto e tema Matrix. O texto de 
 │ 3 encontrados                        │
 │                                      │
 │ > Sensor bancada          -48         │
-│   AA:BB:..:12:34                     │
+│ aa:bb:cc:dd:ee:ff              │
 │   Fone BLE de teste       -67         │
-│   10:20:..:30:40                     │
+│ 10:20:30:40:50:60                  │
 │   (sem nome anunciado)     -81        │
-│   01:02:..:03:04                     │
+│ 01:02:03:04:05:06                  │
 │                                      │
 │ Busca concluida - selecione um alvo  │
 │ S buscar  Enter abrir  ^v mover      │
 └──────────────────────────────────────┘
 ```
 
-**Como usar:** pressione `S` para iniciar uma busca BLE de aproximadamente cinco segundos. `Esc` ou `Del` cancela. Ao terminar, a primeira linha fica selecionada; use `↑`/`↓` para mover o destaque (a linha selecionada aparece com fundo vermelho) e `Enter` para abrir os detalhes desse aparelho. Cada linha mostra nome anunciado, RSSI e endereço parcialmente oculto. Se houver mais dispositivos que linhas disponíveis, `←`/`→` leva ao item anterior/próximo bloco e o destaque acompanha a mudança. Sem resultados, confirme que o periférico está ligado, próximo e anunciando BLE; aparelhos Bluetooth clássico não aparecem. RSSI mais próximo de zero costuma indicar sinal mais forte, mas não mede distância com precisão.
+**Como usar:** pressione `S` para iniciar uma busca BLE de aproximadamente cinco segundos. `Esc` ou `Del` cancela. Ao terminar, a primeira linha fica selecionada; use `↑`/`↓` para mover o destaque (a linha selecionada aparece com fundo vermelho) e `Enter` para abrir os detalhes desse aparelho. Cada linha mostra nome anunciado, RSSI e endereço BLE completo. Se houver mais dispositivos que linhas disponíveis, `←`/`→` leva ao item anterior/próximo bloco e o destaque acompanha a mudança. Sem resultados, confirme que o periférico está ligado, próximo e anunciando BLE; aparelhos Bluetooth clássico não aparecem. RSSI mais próximo de zero costuma indicar sinal mais forte, mas não mede distância com precisão.
 
 ### 2. Detalhes do dispositivo
 
@@ -64,7 +64,7 @@ Interface em orientação horizontal, com fundo preto e tema Matrix. O texto de 
 │ [ BLE FIELD TESTER ]                 │
 │ ------------------------------       │
 │ TESTE DE CONEXAO                     │
-│ Alvo: aa:bb..:12:34                  │
+│ Alvo: aa:bb:cc:dd:ee:ff               │
 │                                      │
 │ Tentativa 2/3                        │
 │ Falhou; nova tentativa em 2s         │
